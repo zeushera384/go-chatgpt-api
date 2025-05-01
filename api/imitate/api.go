@@ -249,14 +249,16 @@ func convertAPIRequest(apiRequest APIRequest, chatRequirementsArkoseRequired boo
 		chatgptRequest.Model = "gpt-4o-mini"
 	} else if strings.HasPrefix(apiRequest.Model, "gpt-4o") {
 		chatgptRequest.Model = "gpt-4o"
-	} else if strings.HasPrefix(apiRequest.Model, "gpt-4") {
-		chatgptRequest.Model = "gpt-4"
 	} else if strings.HasPrefix(apiRequest.Model, "o1-mini") {
 		chatgptRequest.Model = "o1-mini"
 	} else if strings.HasPrefix(apiRequest.Model, "o1") {
 		chatgptRequest.Model = "o1"
-	} else if strings.HasPrefix(apiRequest.Model, "o3-mini") {
-		chatgptRequest.Model = "o3-mini"
+	} else if strings.HasPrefix(apiRequest.Model, "o3") {
+		chatgptRequest.Model = "o3"
+	} else if strings.HasPrefix(apiRequest.Model, "o4-mini") {
+		chatgptRequest.Model = "o4-mini"
+	} else if strings.HasPrefix(apiRequest.Model, "o4-mini-high") {
+		chatgptRequest.Model = "o4-mini-high"
 	}
 
 	matches := gptsRegexp.FindStringSubmatch(apiRequest.Model)
