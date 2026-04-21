@@ -34,7 +34,6 @@ type CreateConversationRequest struct {
 	SupportedEncodings               []string             `json:"supported_encodings"`
 	SupportBuffering                 bool                 `json:"supports_buffering"`
 	SystemHints                      []string             `json:"system_hints"`
-	ThinkingEffort                   string               `json:"thinking_effort,omitempty"`
 	Timezone                         string               `json:"timezone"`
 	TimezoneOffsetMin                int                  `json:"timezone_offset_min"`
 	VariantPurpose                   string               `json:"variant_purpose"`

@@ -22,6 +22,7 @@ import (
 
 var (
 	reg        *regexp.Regexp
+	token      string
 	gptsRegexp = regexp.MustCompile(`-gizmo-g-(\w+)`)
 )
 
@@ -42,8 +43,23 @@ func CreateChatCompletions(c *gin.Context) {
 		return
 	}
 
-	accessToken := resolveImitateAccessToken(c)
-	if accessToken == "" {
+	authHeader := c.GetHeader(api.AuthorizationHeader)
+	imitateToken := os.Getenv("IMITATE_API_KEY")
+	if authHeader != "" {
+		customAccessToken := strings.Replace(authHeader, "Bearer ", "", 1)
+		// Check if customAccessToken starts with sk-
+		if strings.HasPrefix(customAccessToken, "eyJhbGciOiJSUzI1NiI") {
+			token = customAccessToken
+			// use defiend access token if the provided api key is equal to "IMITATE_API_KEY"
+		} else if imitateToken != "" && customAccessToken == imitateToken {
+			token = os.Getenv("IMITATE_ACCESS_TOKEN")
+			if token == "" {
+				token = api.IMITATE_accessToken
+			}
+		}
+	}
+
+	if token == "" {
 		//logger.Warn("no token was provided, use no account approach")
 		c.JSON(400, gin.H{"error": gin.H{
 			"message": "API KEY is missing or invalid",
@@ -57,27 +73,27 @@ func CreateChatCompletions(c *gin.Context) {
 	uid := uuid.NewString()
 	var chatRequirements *chatgpt.ChatRequirements
 	var p string
-	chatRequirements, p, err = chatgpt.GetChatRequirementsByAccessToken(accessToken, uid)
+	chatRequirements, p, err = chatgpt.GetChatRequirementsByAccessToken(token, uid)
 	if err != nil {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, api.ReturnMessage(err.Error()))
-		return
-	}
+    c.AbortWithStatusJSON(http.StatusInternalServerError, api.ReturnMessage(err.Error()))
+    return
+}
 	if chatRequirements == nil {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "unable to check chat requirement"})
-		return
-	}
+    c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "unable to check chat requirement"})
+    return
+}
 	for i := 0; i < chatgpt.PowRetryTimes; i++ {
-		if chatRequirements.Proof.Required && chatRequirements.Proof.Difficulty <= chatgpt.PowMaxDifficulty {
-			logger.Warn(fmt.Sprintf("Proof of work difficulty too high: %s. Retrying... %d/%d ", chatRequirements.Proof.Difficulty, i+1, chatgpt.PowRetryTimes))
-			chatRequirements, _, err = chatgpt.GetChatRequirementsByAccessToken(accessToken, api.OAIDID)
-			if chatRequirements == nil {
-				c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "unable to check chat requirement"})
-				return
-			}
-		} else {
-			break
-		}
-	}
+    if chatRequirements.Proof.Required && chatRequirements.Proof.Difficulty <= chatgpt.PowMaxDifficulty {
+        logger.Warn(fmt.Sprintf("Proof of work difficulty too high: %s. Retrying... %d/%d ", chatRequirements.Proof.Difficulty, i+1, chatgpt.PowRetryTimes))
+        chatRequirements, _, err = chatgpt.GetChatRequirementsByAccessToken(token, api.OAIDID)
+        if chatRequirements == nil {
+            c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "unable to check chat requirement"})
+            return
+        }
+    } else {
+        break
+    }
+}
 	if chatRequirements == nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "unable to check chat requirement"})
 		return
@@ -104,9 +120,9 @@ func CreateChatCompletions(c *gin.Context) {
 	}
 
 	// 将聊天请求转换为ChatGPT请求。
-	translatedRequest := convertAPIRequest(originalRequest, chatRequirements.Arkose.Required, chatRequirements.Arkose.Dx, accessToken)
+	translatedRequest := convertAPIRequest(originalRequest, chatRequirements.Arkose.Required, chatRequirements.Arkose.Dx, token)
 
-	response, done := sendConversationRequest(c, translatedRequest, accessToken, arkoseToken, chatRequirements.Token, uid, proofToken, turnstileToken)
+	response, done := sendConversationRequest(c, translatedRequest, token, arkoseToken, chatRequirements.Token, uid, proofToken, turnstileToken)
 	if done {
 		//c.JSON(500, gin.H{
 		//	"error": "error sending request",
@@ -130,7 +146,7 @@ func CreateChatCompletions(c *gin.Context) {
 	for i := 3; i > 0; i-- {
 		var continueInfo *ContinueInfo
 		var responsePart string
-		responsePart, continueInfo = Handler(c, response, accessToken, uid, originalRequest.Stream)
+		responsePart, continueInfo = Handler(c, response, token, uid, originalRequest.Stream)
 		fullResponse += responsePart
 		if continueInfo == nil {
 			break
@@ -140,7 +156,7 @@ func CreateChatCompletions(c *gin.Context) {
 		translatedRequest.Action = "continue"
 		translatedRequest.ConversationID = continueInfo.ConversationID
 		translatedRequest.ParentMessageID = continueInfo.ParentID
-		chatRequirements, _, _ := chatgpt.GetChatRequirementsByAccessToken(accessToken, uid)
+		chatRequirements, _, _ := chatgpt.GetChatRequirementsByAccessToken(token, uid)
 		if chatRequirements == nil {
 			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "unable to check chat requirements"})
 			return
@@ -148,7 +164,7 @@ func CreateChatCompletions(c *gin.Context) {
 		for i := 0; i < chatgpt.PowRetryTimes; i++ {
 			if chatRequirements.Proof.Required && chatRequirements.Proof.Difficulty <= chatgpt.PowMaxDifficulty {
 				logger.Warn(fmt.Sprintf("Proof of work difficulty too high: %s. Retrying... %d/%d ", chatRequirements.Proof.Difficulty, i+1, chatgpt.PowRetryTimes))
-				chatRequirements, _, _ = chatgpt.GetChatRequirementsByAccessToken(accessToken, api.OAIDID)
+				chatRequirements, _, _ = chatgpt.GetChatRequirementsByAccessToken(token, api.OAIDID)
 				if chatRequirements == nil {
 					c.JSON(500, gin.H{"error": "unable to check chat requirement"})
 					return
@@ -162,7 +178,7 @@ func CreateChatCompletions(c *gin.Context) {
 		}
 		if chatRequirements.Arkose.Required {
 			arkoseToken, err := chatgpt.GetArkoseTokenForModel(translatedRequest.Model, chatRequirements.Arkose.Dx)
-			arkoseToken = accessToken
+			arkoseToken = token
 			if err != nil || arkoseToken == "" {
 				c.AbortWithStatusJSON(http.StatusForbidden, api.ReturnMessage(err.Error()))
 			}
@@ -172,7 +188,7 @@ func CreateChatCompletions(c *gin.Context) {
 			turnstileToken = chatgpt.ProcessTurnstile(chatRequirements.Turnstile.DX, p)
 		}
 
-		response, done = sendConversationRequest(c, translatedRequest, accessToken, arkoseToken, chatRequirements.Token, uid, proofToken, turnstileToken)
+		response, done = sendConversationRequest(c, translatedRequest, token, arkoseToken, chatRequirements.Token, uid, proofToken, turnstileToken)
 
 		if done {
 			//c.JSON(500, gin.H{
@@ -218,55 +234,24 @@ func generateId() string {
 	return "chatcmpl-" + id
 }
 
-func resolveImitateAccessToken(c *gin.Context) string {
-	authHeader := c.GetHeader(api.AuthorizationHeader)
-	imitateToken := os.Getenv("IMITATE_API_KEY")
-	if authHeader == "" {
-		return ""
-	}
-
-	customAccessToken := strings.TrimPrefix(authHeader, "Bearer ")
-	if strings.HasPrefix(customAccessToken, "eyJhbGciOiJSUzI1NiI") {
-		return customAccessToken
-	}
-
-	if imitateToken != "" && customAccessToken == imitateToken {
-		token := os.Getenv("IMITATE_ACCESS_TOKEN")
-		if token == "" {
-			token = api.IMITATE_accessToken
-		}
-		return token
-	}
-
-	return ""
-}
-
 func convertAPIRequest(apiRequest APIRequest, chatRequirementsArkoseRequired bool, chatRequirementsArkoseDx string, token string) chatgpt.CreateConversationRequest {
 	chatgptRequest := NewChatGPTRequest()
 
-	model := strings.ToLower(apiRequest.Model)
-	if strings.HasPrefix(model, "gpt-5.3") || strings.HasPrefix(model, "gpt-5-3") || strings.HasPrefix(model, "instant") {
-		chatgptRequest.Model = "gpt-5-3"
-	} else if strings.HasPrefix(model, "gpt-5.4-pro") || strings.HasPrefix(model, "gpt-5-4-pro") {
-		chatgptRequest.Model = "gpt-5-4-pro"
-	} else if strings.HasPrefix(model, "gpt-5.4") || strings.HasPrefix(model, "gpt-5-4") || strings.HasPrefix(model, "thinking") {
-		chatgptRequest.Model = "gpt-5-4-thinking"
-	} else if strings.HasPrefix(model, "gpt-4o-mini") {
+	if strings.HasPrefix(apiRequest.Model, "gpt-4o-mini") {
 		chatgptRequest.Model = "gpt-4o-mini"
-	} else if strings.HasPrefix(model, "gpt-4o") {
+	} else if strings.HasPrefix(apiRequest.Model, "gpt-4o") {
 		chatgptRequest.Model = "gpt-4o"
-	} else if strings.HasPrefix(model, "o1-mini") {
+	} else if strings.HasPrefix(apiRequest.Model, "o1-mini") {
 		chatgptRequest.Model = "o1-mini"
-	} else if strings.HasPrefix(model, "o1") {
+	} else if strings.HasPrefix(apiRequest.Model, "o1") {
 		chatgptRequest.Model = "o1"
-	} else if strings.HasPrefix(model, "o3") {
+	} else if strings.HasPrefix(apiRequest.Model, "o3") {
 		chatgptRequest.Model = "o3"
-	} else if strings.HasPrefix(model, "o4-mini") {
+	} else if strings.HasPrefix(apiRequest.Model, "o4-mini") {
 		chatgptRequest.Model = "o4-mini"
-	} else if strings.HasPrefix(model, "o4-mini-high") {
+	} else if strings.HasPrefix(apiRequest.Model, "o4-mini-high") {
 		chatgptRequest.Model = "o4-mini-high"
 	}
-	chatgptRequest.ThinkingEffort = strings.ToLower(strings.TrimSpace(apiRequest.ThinkingEffort))
 
 	matches := gptsRegexp.FindStringSubmatch(apiRequest.Model)
 	if len(matches) == 2 {
@@ -445,23 +430,6 @@ func Handler(c *gin.Context, resp *http.Response, token string, uuid string, str
 		line = line[6:]
 		// Check if line starts with [DONE]
 		if !strings.HasPrefix(line, "[DONE]") {
-			if patchText, ok := extractPatchedText(line, &previousText); ok {
-				translatedResponse := NewChatCompletionChunk(patchText)
-				if isRole {
-					translatedResponse.Choices[0].Delta.Role = "assistant"
-					isRole = false
-				}
-				responseString := "data: " + translatedResponse.String() + "\n\n"
-				if stream {
-					_, err = c.Writer.WriteString(responseString)
-					if err != nil {
-						return "", nil
-					}
-				}
-				c.Writer.Flush()
-				continue
-			}
-
 			// Parse the line as JSON
 			err = json.Unmarshal([]byte(line), &originalResponse)
 			if err != nil {
@@ -595,63 +563,12 @@ func Handler(c *gin.Context, resp *http.Response, token string, uuid string, str
 	}
 	responseText += previousText.Text
 	if !maxTokens {
-		return responseText, nil
+		return responseText + previousText.Text, nil
 	}
-	return responseText, &ContinueInfo{
+	return responseText + previousText.Text, &ContinueInfo{
 		ConversationID: originalResponse.ConversationID,
 		ParentID:       originalResponse.Message.ID,
 	}
-}
-
-type patchOperation struct {
-	Path  string      `json:"p"`
-	Op    string      `json:"o"`
-	Value interface{} `json:"v"`
-}
-
-type patchEnvelope struct {
-	Op    string           `json:"o"`
-	Value []patchOperation `json:"v"`
-}
-
-func extractPatchedText(line string, previousText *StringStruct) (string, bool) {
-	var envelope patchEnvelope
-	if err := json.Unmarshal([]byte(line), &envelope); err != nil {
-		return "", false
-	}
-	if len(envelope.Value) == 0 {
-		return "", false
-	}
-
-	var deltaText string
-	for _, operation := range envelope.Value {
-		if operation.Path != "/message/content/parts/0" {
-			continue
-		}
-		value, ok := operation.Value.(string)
-		if !ok {
-			continue
-		}
-
-		switch operation.Op {
-		case "append":
-			previousText.Text += value
-			deltaText += value
-		case "replace":
-			replacement := value
-			if strings.HasPrefix(replacement, previousText.Text) {
-				deltaText += strings.TrimPrefix(replacement, previousText.Text)
-			} else {
-				deltaText += replacement
-			}
-			previousText.Text = replacement
-		}
-	}
-
-	if deltaText == "" {
-		return "", false
-	}
-	return deltaText, true
 }
 
 var urlAttrMap = make(map[string]string)
