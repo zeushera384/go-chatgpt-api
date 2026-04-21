@@ -165,7 +165,7 @@ func ListFiles(c *gin.Context) {
 		return
 	}
 
-	items, err := listLibraryFiles(accessToken)
+	items, err := listLibraryFiles(c, accessToken)
 	if err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 		return
@@ -189,7 +189,7 @@ func RetrieveFile(c *gin.Context) {
 	}
 
 	fileID := c.Param("id")
-	item, err := findLibraryFile(accessToken, fileID)
+	item, err := findLibraryFile(c, accessToken, fileID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "file not found"})
 		return
@@ -304,7 +304,7 @@ func processUpload(c *gin.Context, accessToken string, fileID string, useCase st
 	return libraryID, libraryName, libraryMime, nil
 }
 
-func listLibraryFiles(accessToken string) ([]libraryItem, error) {
+func listLibraryFiles(c *gin.Context, accessToken string) ([]libraryItem, error) {
 	jsonBytes := []byte(`{"limit":50,"cursor":null}`)
 	resp, err := doChatGPTJSONRequest(accessToken, http.MethodPost, chatgpt.ApiPrefix+"/files/library", bytes.NewBuffer(jsonBytes))
 	if err != nil {
@@ -323,8 +323,8 @@ func listLibraryFiles(accessToken string) ([]libraryItem, error) {
 	return library.Items, nil
 }
 
-func findLibraryFile(accessToken string, fileID string) (*libraryItem, error) {
-	items, err := listLibraryFiles(accessToken)
+func findLibraryFile(c *gin.Context, accessToken string, fileID string) (*libraryItem, error) {
+	items, err := listLibraryFiles(c, accessToken)
 	if err != nil {
 		return nil, err
 	}
@@ -386,8 +386,8 @@ func doChatGPTJSONRequest(accessToken string, method string, endpoint string, bo
 	return api.Client.Do(req)
 }
 
-func BuildAttachmentMetadataByFileID(accessToken string, fileID string) (map[string]interface{}, error) {
-	item, err := findLibraryFile(accessToken, fileID)
+func BuildAttachmentMetadataByFileID(c *gin.Context, accessToken string, fileID string) (map[string]interface{}, error) {
+	item, err := findLibraryFile(c, accessToken, fileID)
 	if err != nil {
 		return nil, err
 	}
