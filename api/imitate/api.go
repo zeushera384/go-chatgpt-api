@@ -73,35 +73,27 @@ func CreateChatCompletions(c *gin.Context) {
 	uid := uuid.NewString()
 	var chatRequirements *chatgpt.ChatRequirements
 	var p string
-	go func() {
-		chatRequirements, p, err = chatgpt.GetChatRequirementsByAccessToken(token, uid)
-		if err != nil {
-			c.AbortWithStatusJSON(http.StatusInternalServerError, api.ReturnMessage(err.Error()))
-			return
-		}
-
-		if chatRequirements == nil {
-			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "unable to check chat requirement"})
-			return
-		}
-
-		for i := 0; i < chatgpt.PowRetryTimes; i++ {
-			if chatRequirements.Proof.Required && chatRequirements.Proof.Difficulty <= chatgpt.PowMaxDifficulty {
-				logger.Warn(fmt.Sprintf("Proof of work difficulty too high: %s. Retrying... %d/%d ", chatRequirements.Proof.Difficulty, i+1, chatgpt.PowRetryTimes))
-				chatRequirements, _, err = chatgpt.GetChatRequirementsByAccessToken(token, api.OAIDID)
-				if chatRequirements == nil {
-					c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "unable to check chat requirement"})
-					return
-				}
-			} else {
-				break
-			}
-		}
-	}()
+	chatRequirements, p, err = chatgpt.GetChatRequirementsByAccessToken(token, uid)
 	if err != nil {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "unable to create ws tunnel"})
-		return
-	}
+    c.AbortWithStatusJSON(http.StatusInternalServerError, api.ReturnMessage(err.Error()))
+    return
+}
+	if chatRequirements == nil {
+    c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "unable to check chat requirement"})
+    return
+}
+	for i := 0; i < chatgpt.PowRetryTimes; i++ {
+    if chatRequirements.Proof.Required && chatRequirements.Proof.Difficulty <= chatgpt.PowMaxDifficulty {
+        logger.Warn(fmt.Sprintf("Proof of work difficulty too high: %s. Retrying... %d/%d ", chatRequirements.Proof.Difficulty, i+1, chatgpt.PowRetryTimes))
+        chatRequirements, _, err = chatgpt.GetChatRequirementsByAccessToken(token, api.OAIDID)
+        if chatRequirements == nil {
+            c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "unable to check chat requirement"})
+            return
+        }
+    } else {
+        break
+    }
+}
 	if chatRequirements == nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "unable to check chat requirement"})
 		return
@@ -114,8 +106,8 @@ func CreateChatCompletions(c *gin.Context) {
 
 	var arkoseToken string
 	if chatRequirements.Arkose.Required {
-		token, err := chatgpt.GetArkoseTokenForModel(originalRequest.Model, chatRequirements.Arkose.Dx)
-		arkoseToken = token
+		_, err := chatgpt.GetArkoseTokenForModel(originalRequest.Model, chatRequirements.Arkose.Dx)
+		//arkoseToken = token
 		if err != nil || arkoseToken == "" {
 			c.AbortWithStatusJSON(http.StatusForbidden, api.ReturnMessage(err.Error()))
 			return
