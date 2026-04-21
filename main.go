@@ -171,6 +171,10 @@ func setupImitateAPIs(router *gin.Engine) {
 		apiGroup := imitateGroup.Group("/v1")
 		{
 			apiGroup.POST("/chat/completions", imitate.CreateChatCompletions)
+			apiGroup.POST("/files", imitate.CreateFile)
+			apiGroup.GET("/files", imitate.ListFiles)
+			apiGroup.GET("/files/:id", imitate.RetrieveFile)
+			apiGroup.DELETE("/files/:id", imitate.DeleteFile)
 		}
 	}
 }
