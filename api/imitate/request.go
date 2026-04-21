@@ -15,9 +15,10 @@ type ContinueInfo struct {
 }
 
 type APIRequest struct {
-	Messages []ApiMessage `json:"messages"`
-	Stream   bool         `json:"stream"`
-	Model    string       `json:"model"`
+	Messages       []ApiMessage `json:"messages"`
+	Stream         bool         `json:"stream"`
+	Model          string       `json:"model"`
+	ThinkingEffort string       `json:"thinking_effort,omitempty"`
 }
 
 type ApiMessage struct {
