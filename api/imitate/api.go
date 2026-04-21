@@ -278,10 +278,13 @@ func convertAPIRequest(apiRequest APIRequest, chatRequirementsArkoseRequired boo
 		if apiMessage.Role == "system" {
 			apiMessage.Role = "critic"
 		}
-		if apiMessage.Metadata == nil {
-			apiMessage.Metadata = map[string]string{}
-		}
-		chatgptRequest.AddMessage(apiMessage.Role, apiMessage.Content, apiMessage.Metadata)
+		content, metadata := convertAPIMessage(apiMessage, token)
+		chatgptRequest.Messages = append(chatgptRequest.Messages, chatgpt.Message{
+			ID:       uuid.NewString(),
+			Author:   chatgpt.Author{Role: apiMessage.Role},
+			Content:  content,
+			Metadata: metadata,
+		})
 	}
 
 	if chatgptRequest.ConversationMode.Kind == "" {
@@ -289,6 +292,124 @@ func convertAPIRequest(apiRequest APIRequest, chatRequirementsArkoseRequired boo
 	}
 
 	return chatgptRequest
+}
+
+func convertAPIMessage(apiMessage ApiMessage, accessToken string) (chatgpt.Content, interface{}) {
+	metadata := ensureMetadataMap(apiMessage.Metadata)
+	content := chatgpt.Content{ContentType: "text", Parts: []interface{}{""}}
+	attachments := getAttachmentList(metadata)
+
+	switch raw := apiMessage.Content.(type) {
+	case string:
+		content.Parts = []interface{}{raw}
+		return content, metadata
+	case []interface{}:
+		parts := make([]interface{}, 0)
+		for _, item := range raw {
+			partMap, ok := item.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			itemType, _ := partMap["type"].(string)
+			switch itemType {
+			case "text", "input_text":
+				if text, ok := partMap["text"].(string); ok {
+					parts = append(parts, text)
+				}
+			case "input_image", "image_url":
+				fileID := extractFileID(partMap)
+				if fileID == "" {
+					continue
+				}
+				parts = append(parts, map[string]interface{}{
+					"content_type":  "image_asset_pointer",
+					"asset_pointer": "sediment://" + fileID,
+				})
+				if att, err := BuildAttachmentMetadataByFileID(accessToken, fileID); err == nil {
+					attachments = append(attachments, att)
+				}
+			case "input_file":
+				fileID := extractFileID(partMap)
+				if fileID == "" {
+					continue
+				}
+				if att, err := BuildAttachmentMetadataByFileID(accessToken, fileID); err == nil {
+					attachments = append(attachments, att)
+				}
+			}
+		}
+		if len(parts) == 0 {
+			parts = append(parts, "")
+		}
+		content.Parts = parts
+		if hasImagePart(parts) {
+			content.ContentType = "multimodal_text"
+		}
+	default:
+		content.Parts = []interface{}{fmt.Sprintf("%v", apiMessage.Content)}
+	}
+
+	metadata["attachments"] = attachments
+	return content, metadata
+}
+
+func ensureMetadataMap(metadata interface{}) map[string]interface{} {
+	if metadata == nil {
+		return map[string]interface{}{}
+	}
+	if m, ok := metadata.(map[string]interface{}); ok {
+		return m
+	}
+
+	payload, err := json.Marshal(metadata)
+	if err != nil {
+		return map[string]interface{}{}
+	}
+	var m map[string]interface{}
+	if err = json.Unmarshal(payload, &m); err != nil {
+		return map[string]interface{}{}
+	}
+	return m
+}
+
+func getAttachmentList(metadata map[string]interface{}) []interface{} {
+	v, ok := metadata["attachments"]
+	if !ok || v == nil {
+		return make([]interface{}, 0)
+	}
+	list, ok := v.([]interface{})
+	if !ok {
+		return make([]interface{}, 0)
+	}
+	return list
+}
+
+func extractFileID(partMap map[string]interface{}) string {
+	if fileID, ok := partMap["file_id"].(string); ok {
+		return fileID
+	}
+	if imageFile, ok := partMap["image_file"].(map[string]interface{}); ok {
+		if fileID, ok := imageFile["file_id"].(string); ok {
+			return fileID
+		}
+	}
+	if inputFile, ok := partMap["input_file"].(map[string]interface{}); ok {
+		if fileID, ok := inputFile["file_id"].(string); ok {
+			return fileID
+		}
+	}
+	return ""
+}
+
+func hasImagePart(parts []interface{}) bool {
+	for _, part := range parts {
+		if m, ok := part.(map[string]interface{}); ok {
+			if contentType, ok := m["content_type"].(string); ok && contentType == "image_asset_pointer" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func NewChatGPTRequest() chatgpt.CreateConversationRequest {

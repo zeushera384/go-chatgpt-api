@@ -23,7 +23,7 @@ type APIRequest struct {
 
 type ApiMessage struct {
 	Role     string      `json:"role"`
-	Content  string      `json:"content"`
+	Content  interface{} `json:"content"`
 	Metadata interface{} `json:"metadata"`
 }
 
